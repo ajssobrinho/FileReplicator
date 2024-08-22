@@ -7,14 +7,14 @@
     {
         private readonly string _sourceFolder;
         private readonly string _replicaFolder;
-        private readonly int _interval;
+        private readonly int _syncIntervalInSeconds;
         private readonly Logger _logger;
 
-        public FileSynchronizer(string sourceFolder, string replicaFolder, int interval, string logFilePath)
+        public FileSynchronizer(string sourceFolder, string replicaFolder, int syncIntervalInSeconds, string logFilePath)
         {
             _sourceFolder = sourceFolder;
             _replicaFolder = replicaFolder;
-            _interval = interval;
+            _syncIntervalInSeconds = syncIntervalInSeconds;
             _logger = new Logger(logFilePath);
         }
 
@@ -31,12 +31,14 @@
                     _logger.Log($"Error during synchronization: {ex.Message}");
                 }
 
-                Thread.Sleep(_interval);
+                Thread.Sleep(_syncIntervalInSeconds);
             }
         }
 
         private void SynchronizeFolders()
         {
+            _logger.Log("Synchronization Started");
+
             if (!Directory.Exists(_sourceFolder))
             {
                 _logger.Log($"Source folder '{_sourceFolder}' does not exist.");
@@ -49,7 +51,44 @@
                 _logger.Log($"Created replica folder '{_replicaFolder}'.");
             }
 
-            // Copy new and updated files
+            CopyFiles();
+
+            RemoveNonExistingFiles();
+
+            RemoveEmptyDirectories();
+
+            _logger.Log("Synchronization complete.");
+        }
+
+        private void RemoveEmptyDirectories()
+        {
+            foreach (var replicaDir in Directory.GetDirectories(_replicaFolder, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+            {
+                if (!Directory.EnumerateFileSystemEntries(replicaDir).Any())
+                {
+                    Directory.Delete(replicaDir);
+                    _logger.Log($"Deleted empty directory: {replicaDir}");
+                }
+            }
+        }
+
+        private void RemoveNonExistingFiles()
+        {
+            foreach (var replicaFilePath in Directory.GetFiles(_replicaFolder, "*", SearchOption.AllDirectories))
+            {
+                var relativePath = Path.GetRelativePath(_replicaFolder, replicaFilePath);
+                var sourceFilePath = Path.Combine(_sourceFolder, relativePath);
+
+                if (!File.Exists(sourceFilePath))
+                {
+                    File.Delete(replicaFilePath);
+                    _logger.Log($"Deleted file: {replicaFilePath}");
+                }
+            }
+        }
+
+        private void CopyFiles()
+        {
             foreach (var sourceFilePath in Directory.GetFiles(_sourceFolder, "*", SearchOption.AllDirectories))
             {
                 var relativePath = Path.GetRelativePath(_sourceFolder, sourceFilePath);
@@ -62,31 +101,6 @@
                     _logger.Log($"Copied file: {sourceFilePath} to {replicaFilePath}");
                 }
             }
-
-            // Remove files that don't exist in source
-            foreach (var replicaFilePath in Directory.GetFiles(_replicaFolder, "*", SearchOption.AllDirectories))
-            {
-                var relativePath = Path.GetRelativePath(_replicaFolder, replicaFilePath);
-                var sourceFilePath = Path.Combine(_sourceFolder, relativePath);
-
-                if (!File.Exists(sourceFilePath))
-                {
-                    File.Delete(replicaFilePath);
-                    _logger.Log($"Deleted file: {replicaFilePath}");
-                }
-            }
-
-            // Remove empty directories from replica
-            foreach (var replicaDir in Directory.GetDirectories(_replicaFolder, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
-            {
-                if (!Directory.EnumerateFileSystemEntries(replicaDir).Any())
-                {
-                    Directory.Delete(replicaDir);
-                    _logger.Log($"Deleted empty directory: {replicaDir}");
-                }
-            }
-
-            _logger.Log("Synchronization complete.");
-        }        
+        }
     }
 }
